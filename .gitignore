@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+*.hnmod
+dist/
+builds/
+.DS_Store
+Thumbs.db

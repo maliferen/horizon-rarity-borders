@@ -1,0 +1,12 @@
+[package]
+name = "rarity_borders"
+version = "0.1.0"
+edition = "2024"
+authors = ["maliferen"]
+description = "Adds colored borders to inventory items based on their rarity in Horizon Minecraft."
+license = "MIT"
+
+[lib]
+path = "mixins/rarity_borders/runtime.rs"
+
+[dependencies]
