@@ -19,15 +19,15 @@ pub const DESCRIPTION: &str =
 
 /// Master ON/OFF toggle (default: true).
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static ENABLED_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Whether to show borders for Common items (default: false).
 static SHOW_COMMON: AtomicBool = AtomicBool::new(false);
+static SHOW_COMMON_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Whether to show borders in in-game HUD hotbar (default: false).
 static SHOW_HOTBAR: AtomicBool = AtomicBool::new(false);
-
-/// Tracks whether settings were synchronized from disk.
-static INITIALIZED: AtomicBool = AtomicBool::new(false);
+static SHOW_HOTBAR_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Vanilla-styled rarity colors (RGB).
 pub const COLOR_COMMON: u32 = 0x94A3B8; // Slate Gray (neutral, subtle)
@@ -123,73 +123,119 @@ pub fn resolve_rarity(
 
 /// Checks if master toggle is enabled, synchronizing with saved settings if needed.
 pub fn is_enabled(fallback: impl FnOnce() -> Option<bool>) -> bool {
-    if !INITIALIZED.load(Ordering::Relaxed) {
+    if !ENABLED_INITIALIZED.load(Ordering::Acquire) {
         if let Some(v) = fallback() {
-            ENABLED.store(v, Ordering::SeqCst);
+            ENABLED.store(v, Ordering::Release);
         }
-        INITIALIZED.store(true, Ordering::SeqCst);
+        ENABLED_INITIALIZED.store(true, Ordering::Release);
     }
-    ENABLED.load(Ordering::Relaxed)
+    ENABLED.load(Ordering::Acquire)
 }
 
 /// Sets master enabled state.
 pub fn set_enabled(value: bool) {
-    ENABLED.store(value, Ordering::SeqCst);
-    INITIALIZED.store(true, Ordering::SeqCst);
+    ENABLED.store(value, Ordering::Release);
+    ENABLED_INITIALIZED.store(true, Ordering::Release);
 }
 
 /// Toggles master enabled state.
 #[allow(dead_code)]
 pub fn toggle_enabled() -> bool {
-    let next = !ENABLED.load(Ordering::Relaxed);
-    ENABLED.store(next, Ordering::SeqCst);
+    let next = !ENABLED.load(Ordering::Acquire);
+    set_enabled(next);
     next
 }
 
 /// Checks if borders for common items are enabled.
 pub fn is_show_common(fallback: impl FnOnce() -> Option<bool>) -> bool {
-    if !INITIALIZED.load(Ordering::Relaxed)
-        && let Some(v) = fallback()
-    {
-        SHOW_COMMON.store(v, Ordering::SeqCst);
+    if !SHOW_COMMON_INITIALIZED.load(Ordering::Acquire) {
+        if let Some(v) = fallback() {
+            SHOW_COMMON.store(v, Ordering::Release);
+        }
+        SHOW_COMMON_INITIALIZED.store(true, Ordering::Release);
     }
-    SHOW_COMMON.load(Ordering::Relaxed)
+    SHOW_COMMON.load(Ordering::Acquire)
 }
 
 /// Sets whether common items should show borders.
 pub fn set_show_common(value: bool) {
-    SHOW_COMMON.store(value, Ordering::SeqCst);
+    SHOW_COMMON.store(value, Ordering::Release);
+    SHOW_COMMON_INITIALIZED.store(true, Ordering::Release);
 }
 
 /// Toggles common items display.
 #[allow(dead_code)]
 pub fn toggle_show_common() -> bool {
-    let next = !SHOW_COMMON.load(Ordering::Relaxed);
-    SHOW_COMMON.store(next, Ordering::SeqCst);
+    let next = !SHOW_COMMON.load(Ordering::Acquire);
+    set_show_common(next);
     next
 }
 
 /// Checks if borders in the HUD hotbar are enabled.
 pub fn is_show_hotbar(fallback: impl FnOnce() -> Option<bool>) -> bool {
-    if !INITIALIZED.load(Ordering::Relaxed)
-        && let Some(v) = fallback()
-    {
-        SHOW_HOTBAR.store(v, Ordering::SeqCst);
+    if !SHOW_HOTBAR_INITIALIZED.load(Ordering::Acquire) {
+        if let Some(v) = fallback() {
+            SHOW_HOTBAR.store(v, Ordering::Release);
+        }
+        SHOW_HOTBAR_INITIALIZED.store(true, Ordering::Release);
     }
-    SHOW_HOTBAR.load(Ordering::Relaxed)
+    SHOW_HOTBAR.load(Ordering::Acquire)
 }
 
 /// Sets whether HUD hotbar items should show borders.
 pub fn set_show_hotbar(value: bool) {
-    SHOW_HOTBAR.store(value, Ordering::SeqCst);
+    SHOW_HOTBAR.store(value, Ordering::Release);
+    SHOW_HOTBAR_INITIALIZED.store(true, Ordering::Release);
 }
 
 /// Toggles HUD hotbar items display.
 #[allow(dead_code)]
 pub fn toggle_show_hotbar() -> bool {
-    let next = !SHOW_HOTBAR.load(Ordering::Relaxed);
-    SHOW_HOTBAR.store(next, Ordering::SeqCst);
+    let next = !SHOW_HOTBAR.load(Ordering::Acquire);
+    set_show_hotbar(next);
     next
+}
+
+/// Helper to determine if a slot border should be rendered and what color it should take.
+/// Ensures centralized, testable decision logic across all screens.
+#[allow(dead_code)]
+pub fn should_render_border(
+    is_master_enabled: bool,
+    is_playing_hud: bool,
+    show_hotbar: bool,
+    is_carried_cursor: bool,
+    is_empty_or_air: bool,
+    rarity: Rarity,
+    show_common: bool,
+) -> Option<u32> {
+    if !is_master_enabled {
+        return None;
+    }
+    if is_empty_or_air {
+        return None;
+    }
+    if is_playing_hud && !show_hotbar {
+        return None;
+    }
+    if is_carried_cursor {
+        return None;
+    }
+    if rarity == Rarity::Common && !show_common {
+        return None;
+    }
+    Some(rarity_color(rarity))
+}
+
+#[cfg(test)]
+pub fn reset_settings_for_tests() {
+    ENABLED.store(true, Ordering::SeqCst);
+    ENABLED_INITIALIZED.store(false, Ordering::SeqCst);
+
+    SHOW_COMMON.store(false, Ordering::SeqCst);
+    SHOW_COMMON_INITIALIZED.store(false, Ordering::SeqCst);
+
+    SHOW_HOTBAR.store(false, Ordering::SeqCst);
+    SHOW_HOTBAR_INITIALIZED.store(false, Ordering::SeqCst);
 }
 
 /// Settings button label for Master toggle with RU/EN localization.
@@ -277,21 +323,85 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_01_empty_slot_no_border() {
-        // If an item stack is empty/None, no border should be computed or drawn.
-        let empty_item: Option<&str> = None;
-        assert!(empty_item.is_none());
+        let _lock = TEST_LOCK.lock().unwrap();
+        reset_settings_for_tests();
+
+        // 1. should_render_border returns None when slot is empty or air
+        assert_eq!(
+            should_render_border(true, false, false, false, true, Rarity::Rare, false),
+            None
+        );
+
+        // 2. An empty/air slot results in zero draw calls in the render callback
+        let mut drawn_rects = 0;
+        let color = should_render_border(true, false, false, false, true, Rarity::Rare, false);
+        if let Some(c) = color {
+            render_slot_border(10.0, 10.0, c, |_, _| drawn_rects += 1);
+        }
+        assert_eq!(drawn_rects, 0);
     }
 
     #[test]
-    fn test_02_common_hidden_by_default() {
-        let rarity = resolve_rarity("common", false, None, false);
-        assert_eq!(rarity, Rarity::Common);
-        // By default show_common is false
-        set_show_common(false);
-        assert!(!is_show_common(|| None));
+    fn test_02_regression_independent_settings_initialization() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        reset_settings_for_tests();
+
+        let mut enabled_read_count = 0;
+        let mut common_read_count = 0;
+        let mut hotbar_read_count = 0;
+
+        // Step 1: Call is_enabled first (this previously broke subsequent common/hotbar reads!)
+        let enabled = is_enabled(|| {
+            enabled_read_count += 1;
+            Some(true)
+        });
+        assert!(enabled);
+        assert_eq!(enabled_read_count, 1);
+
+        // Step 2: Call is_show_common - fallback MUST be executed!
+        let common = is_show_common(|| {
+            common_read_count += 1;
+            Some(true) // disk has saved 'true'
+        });
+        assert!(common, "is_show_common must load saved 'true' from disk");
+        assert_eq!(
+            common_read_count, 1,
+            "Fallback for show_common must be invoked exactly once"
+        );
+
+        // Step 3: Call is_show_hotbar - fallback MUST be executed!
+        let hotbar = is_show_hotbar(|| {
+            hotbar_read_count += 1;
+            Some(true) // disk has saved 'true'
+        });
+        assert!(hotbar, "is_show_hotbar must load saved 'true' from disk");
+        assert_eq!(
+            hotbar_read_count, 1,
+            "Fallback for show_hotbar must be invoked exactly once"
+        );
+
+        // Step 4: Subsequent calls must use cached values without re-invoking fallback
+        assert!(is_enabled(|| {
+            panic!("Should not re-read from disk");
+        }));
+        assert!(is_show_common(|| {
+            panic!("Should not re-read from disk");
+        }));
+        assert!(is_show_hotbar(|| {
+            panic!("Should not re-read from disk");
+        }));
+
+        // Step 5: Test restart simulation where disk has disabled=true, common=true, hotbar=false
+        reset_settings_for_tests();
+        assert!(!is_enabled(|| Some(false)));
+        assert!(is_show_common(|| Some(true)));
+        assert!(!is_show_hotbar(|| Some(false)));
     }
 
     #[test]
@@ -337,19 +447,14 @@ mod tests {
 
     #[test]
     fn test_07_damaged_item_no_durability_overlap() {
-        // Item is at (100.0, 100.0)
         let x = 100.0;
         let y = 100.0;
         let rects = slot_border_rects(x, y, COLOR_UNCOMMON);
 
-        // Vanilla durability bar is at [x + 2, y + 13, 13, 2]
         let bar_y_top = y + 13.0;
-        let bar_y_bottom = bar_y_top + 2.0; // 115.0
+        let bar_y_bottom = bar_y_top + 2.0;
+        let bottom_line_y = rects[3].0[1];
 
-        // Bottom border line is at rects[3]: [x - 1, y + 16, 18, 1]
-        let bottom_line_y = rects[3].0[1]; // 116.0
-
-        // Bottom border line must be strictly below durability bar
         assert!(
             bottom_line_y >= bar_y_bottom,
             "Bottom border line ({}) overlaps durability bar (bottom {})",
@@ -360,16 +465,12 @@ mod tests {
 
     #[test]
     fn test_08_stacked_items_no_text_overlap() {
-        // Item is at (50.0, 50.0)
         let x = 50.0;
         let y = 50.0;
         let rects = slot_border_rects(x, y, COLOR_RARE);
 
-        // Stack count text is drawn inside the item area: roughly [x + 9..x + 16, y + 9..y + 16]
-        // Frame lines are outside: x - 1, x + 16, y - 1, y + 16
         for (rect, _) in rects {
             let [rx, ry, rw, rh] = rect;
-            // Frame rects never cross inside the 16x16 center region where count sits
             let inside_item_x = rx > x && (rx + rw) < (x + 16.0);
             let inside_item_y = ry > y && (ry + rh) < (y + 16.0);
             assert!(
@@ -386,20 +487,17 @@ mod tests {
             let x = 32.0 * scale;
             let y = 32.0 * scale;
             let rects = slot_border_rects(x, y, COLOR_EPIC);
-            // In base GUI points, width is always 18.0 and line thickness is always 1.0
-            assert_eq!(rects[0].0[2], 18.0); // Top width
-            assert_eq!(rects[0].0[3], 1.0); // Top height
-            assert_eq!(rects[3].0[2], 18.0); // Bottom width
-            assert_eq!(rects[3].0[3], 1.0); // Bottom height
+            assert_eq!(rects[0].0[2], 18.0);
+            assert_eq!(rects[0].0[3], 1.0);
+            assert_eq!(rects[3].0[2], 18.0);
+            assert_eq!(rects[3].0[3], 1.0);
         }
     }
 
     #[test]
     fn test_10_resolution_change() {
-        // Slot coordinates can shift when resolution changes (e.g. centered inventory)
         for (ox, oy) in [(100.0, 100.0), (340.0, 180.0), (820.0, 540.0)] {
             let rects = slot_border_rects(ox, oy, COLOR_UNCOMMON);
-            // Slot bounds relative to (ox, oy) remain identical
             assert_eq!(rects[0].0, [ox - 1.0, oy - 1.0, 18.0, 1.0]);
             assert_eq!(rects[1].0, [ox - 1.0, oy, 1.0, 16.0]);
             assert_eq!(rects[2].0, [ox + 16.0, oy, 1.0, 16.0]);
@@ -409,6 +507,9 @@ mod tests {
 
     #[test]
     fn test_11_mod_disabled_toggle() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        reset_settings_for_tests();
+
         set_enabled(true);
         assert!(is_enabled(|| None));
         let toggled = toggle_enabled();
@@ -419,6 +520,9 @@ mod tests {
 
     #[test]
     fn test_12_show_common_toggle() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        reset_settings_for_tests();
+
         set_show_common(false);
         assert!(!is_show_common(|| None));
         let toggled = toggle_show_common();
@@ -440,7 +544,6 @@ mod tests {
         let y = 30.0;
         let rects = slot_border_rects(x, y, COLOR_RARE);
 
-        // Calculate enclosing bounding box
         let mut min_x = f32::INFINITY;
         let mut min_y = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -454,7 +557,6 @@ mod tests {
             max_y = max_y.max(ry + rh);
         }
 
-        // Slot boundary is strictly 18x18
         assert_eq!(min_x, x - 1.0);
         assert_eq!(min_y, y - 1.0);
         assert_eq!(max_x, x + 17.0);
@@ -465,12 +567,10 @@ mod tests {
 
     #[test]
     fn test_14_no_slot_highlight_conflict() {
-        // Slot highlight is drawn centered at (x - 4, y - 4, 24, 24)
         let x = 60.0;
         let y = 60.0;
         let rects = slot_border_rects(x, y, COLOR_EPIC);
 
-        // Slot frame bounds
         let slot_min_x = x - 1.0;
         let slot_max_x = x + 17.0;
         let slot_min_y = y - 1.0;
@@ -478,9 +578,83 @@ mod tests {
 
         for (rect, _) in rects {
             let [rx, ry, rw, rh] = rect;
-            // Frame is completely contained within the 18x18 slot area
             assert!(rx >= slot_min_x && (rx + rw) <= slot_max_x);
             assert!(ry >= slot_min_y && (ry + rh) <= slot_max_y);
         }
+    }
+
+    #[test]
+    fn test_15_should_render_border_carried_cursor_suppression() {
+        // Carried cursor item must NEVER show a slot border
+        let res = should_render_border(true, false, false, true, false, Rarity::Rare, false);
+        assert_eq!(res, None);
+    }
+
+    #[test]
+    fn test_16_should_render_border_hotbar_rules() {
+        // In-game playing HUD:
+        // When show_hotbar is false -> None
+        assert_eq!(
+            should_render_border(true, true, false, false, false, Rarity::Epic, false),
+            None
+        );
+        // When show_hotbar is true -> Some(COLOR_EPIC)
+        assert_eq!(
+            should_render_border(true, true, true, false, false, Rarity::Epic, false),
+            Some(COLOR_EPIC)
+        );
+    }
+
+    #[test]
+    fn test_17_should_render_border_common_item_rules() {
+        // Common item with show_common = false -> None
+        assert_eq!(
+            should_render_border(true, false, false, false, false, Rarity::Common, false),
+            None
+        );
+        // Common item with show_common = true -> Some(COLOR_COMMON)
+        assert_eq!(
+            should_render_border(true, false, false, false, false, Rarity::Common, true),
+            Some(COLOR_COMMON)
+        );
+    }
+
+    #[test]
+    fn test_18_render_slot_border_exact_draw_calls() {
+        let mut drawn = Vec::new();
+        render_slot_border(10.0, 20.0, COLOR_RARE, |rect, argb| {
+            drawn.push((rect, argb));
+        });
+
+        assert_eq!(drawn.len(), 4);
+        // Top line: 0x4D alpha
+        assert_eq!(drawn[0].0, [9.0, 19.0, 18.0, 1.0]);
+        assert_eq!(drawn[0].1, (0x4D << 24) | COLOR_RARE);
+
+        // Left line: 0x66 alpha
+        assert_eq!(drawn[1].0, [9.0, 20.0, 1.0, 16.0]);
+        assert_eq!(drawn[1].1, (0x66 << 24) | COLOR_RARE);
+
+        // Right line: 0x66 alpha
+        assert_eq!(drawn[2].0, [26.0, 20.0, 1.0, 16.0]);
+        assert_eq!(drawn[2].1, (0x66 << 24) | COLOR_RARE);
+
+        // Bottom line: 0xFF solid alpha (prominent vibrant accent)
+        assert_eq!(drawn[3].0, [9.0, 36.0, 18.0, 1.0]);
+        assert_eq!(drawn[3].1, (0xFF << 24) | COLOR_RARE);
+    }
+
+    #[test]
+    fn test_19_resolve_rarity_custom_component_override() {
+        // A stick with custom `minecraft:rarity = "epic"` must resolve to Epic
+        assert_eq!(
+            resolve_rarity("common", false, Some("epic"), false),
+            Rarity::Epic
+        );
+        // And when enchanted, epic remains epic
+        assert_eq!(
+            resolve_rarity("common", false, Some("epic"), true),
+            Rarity::Epic
+        );
     }
 }

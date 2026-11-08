@@ -59,10 +59,15 @@ jobs:
       - name: Install system dependencies for Horizon build
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
 
-      - name: Run official native.py check
+      - name: Run official native.py check (pinned Horizon)
         run: |
           cd horizon-mods
           python3 native/tools/native.py check rarity-borders
+
+      - name: Run official native.py check (latest Nightly)
+        run: |
+          cd horizon-mods
+          python3 native/tools/native.py check rarity-borders --horizon latest
 
       - name: Package .hnmod bundle
         run: |

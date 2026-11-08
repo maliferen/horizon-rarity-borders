@@ -11,6 +11,11 @@ fn rarity_borders_decorations(
         return;
     }
 
+    // Skip empty stacks or air
+    if stack.count == 0 || &*stack.item == "minecraft:air" {
+        return;
+    }
+
     // Skip in-game HUD hotbar unless hotbar borders are enabled
     if !m::is_show_hotbar(|| game.native_setting(m::ID, "hotbar").map(|v| v == "true"))
         && game.screen == crate::game::Screen::Playing

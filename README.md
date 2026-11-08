@@ -17,7 +17,7 @@ The mod is designed to feel like an authentic, native part of Minecraft: sharp 9
   - **Epic:** Soft magenta / purple (`#FF55FF`).
 - **Authentic Vanilla Rarity:** Automatically calculates rarity from custom `minecraft:rarity` components, default item types, ominous banners, and enchantment upgrades (enchanted Common/Uncommon items become Rare; enchanted Rare items become Epic).
 - **Clean Vanilla Aesthetic:** 1px pixel-perfect geometry, prominent solid bottom line accent, zero bloom, zero glowing gradients, and zero circular highlights.
-- **Universal Container Support:** Works across player inventory, single and double chests, barrels, shulker boxes, furnaces, crafting tables, creative menus, and modded container screens.
+- **Shared Decoration Pipeline:** Hooks directly into Horizon's native item decoration renderer (`native_item_decorations`), naturally covering player inventory slots, container screens (chests, barrels, furnaces, crafting grids), and optionally the in-game HUD hotbar.
 - **In-Game Settings:** Full live toggles in `Options → Mods → Rarity Borders` without requiring game restarts.
 - **Lightweight & Fast:** Pure client-side Rust implementation with zero per-frame heap allocations.
 
@@ -46,7 +46,8 @@ Changes take effect immediately upon clicking without needing to restart the gam
 
 - **Minecraft Version:** 26.3
 - **Horizon API:** Native Hooks API 139+
-- **Other Mods:** Fully compatible with Durability Tooltip, Rider HUD, Screenshot Clipboard, and JEI for Horizon.
+- **Ecosystem Integration:** Runs alongside other Horizon native mods (Durability Tooltip, Rider HUD, Screenshot Clipboard) without interference, as slot decoration rendering operates independently from tooltip and HUD overlay hooks.
+- **Client-Side Only:** No server-side components required. Completely safe for vanilla servers.
 
 ## License
 
