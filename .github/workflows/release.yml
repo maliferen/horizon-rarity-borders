@@ -56,6 +56,9 @@ jobs:
           mkdir -p horizon-mods/native
           ln -s "$GITHUB_WORKSPACE/mod" horizon-mods/native/rarity-borders
 
+      - name: Install system dependencies for Horizon build
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+
       - name: Run official native.py check
         run: |
           cd horizon-mods
