@@ -7,7 +7,8 @@ fn rarity_borders_decorations(
 ) {
     use crate::game::rarity_borders as m;
 
-    if !m::is_enabled(|| game.native_setting(m::ID, "enabled").map(|v| v != "false")) {
+    let enabled = m::is_enabled(|| game.native_setting(m::ID, "enabled").map(|v| v != "false"));
+    if !enabled {
         return;
     }
 
@@ -16,33 +17,38 @@ fn rarity_borders_decorations(
         return;
     }
 
-    // Skip in-game HUD hotbar unless hotbar borders are enabled
-    if !m::is_show_hotbar(|| game.native_setting(m::ID, "hotbar").map(|v| v == "true"))
-        && game.screen == crate::game::Screen::Playing
-    {
+    let is_playing_hud = game.screen == crate::game::Screen::Playing;
+    let show_hotbar =
+        m::is_show_hotbar(|| game.native_setting(m::ID, "hotbar").map(|v| v == "true"));
+    if is_playing_hud && !show_hotbar {
         return;
     }
 
-    // Skip floating carried item moving with cursor
-    if game.carried.is_some()
+    let is_carried = game.carried.is_some()
         && (x - (game.cursor.0 - 8.0)).abs() < 0.5
-        && (y - (game.cursor.1 - 8.0)).abs() < 0.5
-    {
+        && (y - (game.cursor.1 - 8.0)).abs() < 0.5;
+    if is_carried {
         return;
     }
 
     let default_rarity = game.item_rarity(&stack.item);
     let rarity_str = crate::item_tooltip::rarity(stack, &default_rarity);
-    let rarity = m::Rarity::parse_str(rarity_str);
-
     let show_common =
         m::is_show_common(|| game.native_setting(m::ID, "common").map(|v| v == "true"));
-    if !show_common && rarity == m::Rarity::Common {
-        return;
-    }
 
-    let color = m::rarity_color(rarity);
-    m::render_slot_border(x, y, color, |rect, argb| {
-        game.native_fill(batch, rect, argb);
-    });
+    m::render_slot_decoration(
+        x,
+        y,
+        enabled,
+        stack.count,
+        &stack.item,
+        is_playing_hud,
+        show_hotbar,
+        is_carried,
+        rarity_str,
+        show_common,
+        |rect, argb| {
+            game.native_fill(batch, rect, argb);
+        },
+    );
 }

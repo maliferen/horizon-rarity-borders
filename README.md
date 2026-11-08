@@ -36,7 +36,7 @@ Changes take effect immediately upon clicking without needing to restart the gam
 
 ## Installation
 
-1. Download the latest `rarity_borders-0.1.0.hnmod` from [Releases](https://github.com/maliferen/horizon-rarity-borders/releases).
+1. Download the latest `rarity_borders-0.1.1.hnmod` from [Releases](https://github.com/maliferen/horizon-rarity-borders/releases).
 2. Place the `.hnmod` file into your instance's `horizon-native-mods/` directory:
    - **Windows:** `%APPDATA%\.horizon\instances\<instance>\horizon-native-mods\`
    - **Linux:** `~/.local/share/horizon/instances/<instance>/horizon-native-mods/`

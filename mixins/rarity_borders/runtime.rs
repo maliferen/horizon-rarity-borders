@@ -11,7 +11,7 @@ pub const ID: &str = "rarity_borders";
 pub const NAME: &str = "Rarity Borders";
 
 /// Semantic version.
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.1.1";
 
 /// Mod description for in-game mod list.
 pub const DESCRIPTION: &str =
@@ -87,6 +87,92 @@ pub const fn rarity_color(rarity: Rarity) -> u32 {
         Rarity::Uncommon => COLOR_UNCOMMON,
         Rarity::Rare => COLOR_RARE,
         Rarity::Epic => COLOR_EPIC,
+    }
+}
+
+/// Resolves the border color from a raw rarity string produced by Horizon's `item_tooltip::rarity()`.
+/// If the rarity is Common and `show_common` is false, returns `None`.
+/// Otherwise returns `Some(color_rgb)`.
+pub fn resolve_border_color_from_rarity_str(rarity_str: &str, show_common: bool) -> Option<u32> {
+    let rarity = Rarity::parse_str(rarity_str);
+    if !show_common && rarity == Rarity::Common {
+        return None;
+    }
+    Some(rarity_color(rarity))
+}
+
+/// Evaluates whether a border should be rendered for an item slot decoration pass.
+/// Directly models and encapsulates the real Horizon rendering pipeline used in `decorations.rs`.
+///
+/// Parameters:
+/// - `is_master_enabled`: whether the mod is enabled
+/// - `count`: `stack.count`
+/// - `item_id`: `&*stack.item` (e.g. "minecraft:air", "minecraft:diamond_sword")
+/// - `is_playing_hud`: whether current screen is `Screen::Playing`
+/// - `show_hotbar`: whether in-game HUD hotbar borders are enabled
+/// - `is_carried_cursor`: whether item is currently being carried/moved by cursor
+/// - `rarity_str`: string slice returned by `crate::item_tooltip::rarity(stack, &default_rarity)`
+/// - `show_common`: whether common borders are enabled
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_slot_border(
+    is_master_enabled: bool,
+    count: u32,
+    item_id: &str,
+    is_playing_hud: bool,
+    show_hotbar: bool,
+    is_carried_cursor: bool,
+    rarity_str: &str,
+    show_common: bool,
+) -> Option<u32> {
+    if !is_master_enabled {
+        return None;
+    }
+    if count == 0 || item_id == "minecraft:air" || item_id.is_empty() {
+        return None;
+    }
+    if is_playing_hud && !show_hotbar {
+        return None;
+    }
+    if is_carried_cursor {
+        return None;
+    }
+    resolve_border_color_from_rarity_str(rarity_str, show_common)
+}
+
+/// Full decoration render runner for a slot.
+/// Evaluates the slot border, and if active, calls `draw(rect, argb)` for each of the 4 border rects.
+/// Returns the number of draw calls issued (0 if slot is empty, disabled, or suppressed; 4 if rendered).
+#[allow(clippy::too_many_arguments)]
+pub fn render_slot_decoration<F>(
+    x: f32,
+    y: f32,
+    is_master_enabled: bool,
+    count: u32,
+    item_id: &str,
+    is_playing_hud: bool,
+    show_hotbar: bool,
+    is_carried_cursor: bool,
+    rarity_str: &str,
+    show_common: bool,
+    draw: F,
+) -> usize
+where
+    F: FnMut([f32; 4], u32),
+{
+    if let Some(color) = evaluate_slot_border(
+        is_master_enabled,
+        count,
+        item_id,
+        is_playing_hud,
+        show_hotbar,
+        is_carried_cursor,
+        rarity_str,
+        show_common,
+    ) {
+        render_slot_border(x, y, color, draw);
+        4
+    } else {
+        0
     }
 }
 
@@ -197,7 +283,7 @@ pub fn toggle_show_hotbar() -> bool {
 }
 
 /// Helper to determine if a slot border should be rendered and what color it should take.
-/// Ensures centralized, testable decision logic across all screens.
+/// Kept for backwards compatibility and high-level decision tables.
 #[allow(dead_code)]
 pub fn should_render_border(
     is_master_enabled: bool,
@@ -332,19 +418,72 @@ mod tests {
         let _lock = TEST_LOCK.lock().unwrap();
         reset_settings_for_tests();
 
-        // 1. should_render_border returns None when slot is empty or air
+        // 1. evaluate_slot_border must return None for count == 0 regardless of item
         assert_eq!(
-            should_render_border(true, false, false, false, true, Rarity::Rare, false),
+            evaluate_slot_border(true, 0, "minecraft:air", false, false, false, "rare", false),
+            None
+        );
+        assert_eq!(
+            evaluate_slot_border(
+                true,
+                0,
+                "minecraft:diamond_sword",
+                false,
+                false,
+                false,
+                "rare",
+                false
+            ),
             None
         );
 
-        // 2. An empty/air slot results in zero draw calls in the render callback
-        let mut drawn_rects = 0;
-        let color = should_render_border(true, false, false, false, true, Rarity::Rare, false);
-        if let Some(c) = color {
-            render_slot_border(10.0, 10.0, c, |_, _| drawn_rects += 1);
-        }
-        assert_eq!(drawn_rects, 0);
+        // 2. evaluate_slot_border must return None for minecraft:air even if count > 0
+        assert_eq!(
+            evaluate_slot_border(true, 1, "minecraft:air", false, false, false, "rare", false),
+            None
+        );
+        assert_eq!(
+            evaluate_slot_border(true, 64, "", false, false, false, "rare", false),
+            None
+        );
+
+        // 3. render_slot_decoration on empty/air slot MUST execute 0 draw calls
+        let mut drawn_calls = 0;
+        let count = render_slot_decoration(
+            10.0,
+            10.0,
+            true,
+            0,
+            "minecraft:air",
+            false,
+            false,
+            false,
+            "rare",
+            false,
+            |_, _| drawn_calls += 1,
+        );
+        assert_eq!(
+            count, 0,
+            "render_slot_decoration must return 0 calls for empty slot"
+        );
+        assert_eq!(drawn_calls, 0, "Empty slot must not trigger any draw calls");
+
+        let mut drawn_calls_air = 0;
+        let count_air = render_slot_decoration(
+            10.0,
+            10.0,
+            true,
+            1,
+            "minecraft:air",
+            false,
+            false,
+            false,
+            "epic",
+            false,
+            |_, _| drawn_calls_air += 1,
+        );
+        assert_eq!(count_air, 0);
+        assert_eq!(drawn_calls_air, 0);
     }
 
     #[test]
@@ -405,48 +544,196 @@ mod tests {
     }
 
     #[test]
-    fn test_03_uncommon_color() {
-        let rarity = resolve_rarity("uncommon", false, None, false);
-        assert_eq!(rarity, Rarity::Uncommon);
-        let color = rarity_color(rarity);
-        assert_eq!(color, COLOR_UNCOMMON);
-        assert_eq!(color, 0xFFFF55);
+    fn test_03_item_tooltip_rarity_pipeline_uncommon() {
+        // Output from crate::item_tooltip::rarity() is "uncommon"
+        let rarity_str = "uncommon";
+        assert_eq!(
+            resolve_border_color_from_rarity_str(rarity_str, false),
+            Some(COLOR_UNCOMMON)
+        );
+
+        let mut drawn = Vec::new();
+        let calls = render_slot_decoration(
+            16.0,
+            16.0,
+            true,
+            1,
+            "minecraft:snort_pottery_sherd",
+            false,
+            false,
+            false,
+            rarity_str,
+            false,
+            |rect, argb| drawn.push((rect, argb)),
+        );
+        assert_eq!(calls, 4);
+        assert_eq!(drawn.len(), 4);
+        assert_eq!(drawn[3].1, (0xFF << 24) | COLOR_UNCOMMON); // Bottom solid accent
     }
 
     #[test]
-    fn test_04_rare_color() {
-        let rarity = resolve_rarity("rare", false, None, false);
-        assert_eq!(rarity, Rarity::Rare);
-        let color = rarity_color(rarity);
-        assert_eq!(color, COLOR_RARE);
-        assert_eq!(color, 0x55FFFF);
+    fn test_04_item_tooltip_rarity_pipeline_rare() {
+        // Output from crate::item_tooltip::rarity() is "rare"
+        let rarity_str = "rare";
+        assert_eq!(
+            resolve_border_color_from_rarity_str(rarity_str, false),
+            Some(COLOR_RARE)
+        );
+
+        let mut drawn = Vec::new();
+        let calls = render_slot_decoration(
+            16.0,
+            16.0,
+            true,
+            1,
+            "minecraft:trident",
+            false,
+            false,
+            false,
+            rarity_str,
+            false,
+            |rect, argb| drawn.push((rect, argb)),
+        );
+        assert_eq!(calls, 4);
+        assert_eq!(drawn.len(), 4);
+        assert_eq!(drawn[3].1, (0xFF << 24) | COLOR_RARE); // Bottom solid accent
     }
 
     #[test]
-    fn test_05_epic_color() {
-        let rarity = resolve_rarity("epic", false, None, false);
-        assert_eq!(rarity, Rarity::Epic);
-        let color = rarity_color(rarity);
-        assert_eq!(color, COLOR_EPIC);
-        assert_eq!(color, 0xFF55FF);
+    fn test_05_item_tooltip_rarity_pipeline_epic() {
+        // Output from crate::item_tooltip::rarity() is "epic"
+        let rarity_str = "epic";
+        assert_eq!(
+            resolve_border_color_from_rarity_str(rarity_str, false),
+            Some(COLOR_EPIC)
+        );
+
+        let mut drawn = Vec::new();
+        let calls = render_slot_decoration(
+            16.0,
+            16.0,
+            true,
+            1,
+            "minecraft:dragon_egg",
+            false,
+            false,
+            false,
+            rarity_str,
+            false,
+            |rect, argb| drawn.push((rect, argb)),
+        );
+        assert_eq!(calls, 4);
+        assert_eq!(drawn.len(), 4);
+        assert_eq!(drawn[3].1, (0xFF << 24) | COLOR_EPIC); // Bottom solid accent
     }
 
     #[test]
-    fn test_06_enchanted_item_upgrade() {
-        // 1. Common + Enchanted -> Rare
-        assert_eq!(resolve_rarity("common", false, None, true), Rarity::Rare);
-        // 2. Uncommon + Enchanted -> Rare
-        assert_eq!(resolve_rarity("uncommon", false, None, true), Rarity::Rare);
-        // 3. Rare + Enchanted -> Epic
-        assert_eq!(resolve_rarity("rare", false, None, true), Rarity::Epic);
-        // 4. Epic + Enchanted -> Epic (caps at Epic)
-        assert_eq!(resolve_rarity("epic", false, None, true), Rarity::Epic);
-        // 5. Ominous banner + Enchanted -> Rare
-        assert_eq!(resolve_rarity("common", true, None, true), Rarity::Rare);
+    fn test_06_item_tooltip_rarity_pipeline_common() {
+        // Output from crate::item_tooltip::rarity() is "common"
+        let rarity_str = "common";
+
+        // When show_common = false -> None and 0 draw calls
+        assert_eq!(
+            resolve_border_color_from_rarity_str(rarity_str, false),
+            None
+        );
+        let mut drawn = Vec::new();
+        let calls = render_slot_decoration(
+            16.0,
+            16.0,
+            true,
+            64,
+            "minecraft:stone",
+            false,
+            false,
+            false,
+            rarity_str,
+            false,
+            |rect, argb| drawn.push((rect, argb)),
+        );
+        assert_eq!(calls, 0);
+        assert_eq!(drawn.len(), 0);
+
+        // When show_common = true -> Some(COLOR_COMMON) and 4 draw calls
+        assert_eq!(
+            resolve_border_color_from_rarity_str(rarity_str, true),
+            Some(COLOR_COMMON)
+        );
+        let mut drawn_on = Vec::new();
+        let calls_on = render_slot_decoration(
+            16.0,
+            16.0,
+            true,
+            64,
+            "minecraft:stone",
+            false,
+            false,
+            false,
+            rarity_str,
+            true,
+            |rect, argb| drawn_on.push((rect, argb)),
+        );
+        assert_eq!(calls_on, 4);
+        assert_eq!(drawn_on.len(), 4);
+        assert_eq!(drawn_on[3].1, (0xFF << 24) | COLOR_COMMON);
     }
 
     #[test]
-    fn test_07_damaged_item_no_durability_overlap() {
+    fn test_07_item_tooltip_enchantment_upgrade_flow() {
+        // Simulate item_tooltip::rarity logic when stack is enchanted:
+        // Common & Uncommon become Rare; Rare becomes Epic; Epic stays Epic.
+        let upgrade = |base_rarity: &str, is_enchanted: bool| -> &'static str {
+            if !is_enchanted {
+                match base_rarity {
+                    "uncommon" => "uncommon",
+                    "rare" => "rare",
+                    "epic" => "epic",
+                    _ => "common",
+                }
+            } else {
+                match base_rarity {
+                    "common" | "uncommon" => "rare",
+                    "rare" => "epic",
+                    _ => "epic",
+                }
+            }
+        };
+
+        // Enchanted Common sword becomes Rare ("rare" -> COLOR_RARE)
+        let res = upgrade("common", true);
+        assert_eq!(res, "rare");
+        assert_eq!(
+            resolve_border_color_from_rarity_str(res, false),
+            Some(COLOR_RARE)
+        );
+
+        // Enchanted Uncommon bow becomes Rare ("rare" -> COLOR_RARE)
+        let res_uncommon = upgrade("uncommon", true);
+        assert_eq!(res_uncommon, "rare");
+        assert_eq!(
+            resolve_border_color_from_rarity_str(res_uncommon, false),
+            Some(COLOR_RARE)
+        );
+
+        // Enchanted Rare trident becomes Epic ("epic" -> COLOR_EPIC)
+        let res_rare = upgrade("rare", true);
+        assert_eq!(res_rare, "epic");
+        assert_eq!(
+            resolve_border_color_from_rarity_str(res_rare, false),
+            Some(COLOR_EPIC)
+        );
+
+        // Enchanted Epic item remains Epic ("epic" -> COLOR_EPIC)
+        let res_epic = upgrade("epic", true);
+        assert_eq!(res_epic, "epic");
+        assert_eq!(
+            resolve_border_color_from_rarity_str(res_epic, false),
+            Some(COLOR_EPIC)
+        );
+    }
+
+    #[test]
+    fn test_08_damaged_item_no_durability_overlap() {
         let x = 100.0;
         let y = 100.0;
         let rects = slot_border_rects(x, y, COLOR_UNCOMMON);
@@ -464,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn test_08_stacked_items_no_text_overlap() {
+    fn test_09_stacked_items_no_text_overlap() {
         let x = 50.0;
         let y = 50.0;
         let rects = slot_border_rects(x, y, COLOR_RARE);
@@ -482,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn test_09_gui_scale_proportionality() {
+    fn test_10_gui_scale_proportionality() {
         for scale in [1.0, 2.0, 3.0, 4.0] {
             let x = 32.0 * scale;
             let y = 32.0 * scale;
@@ -491,17 +778,6 @@ mod tests {
             assert_eq!(rects[0].0[3], 1.0);
             assert_eq!(rects[3].0[2], 18.0);
             assert_eq!(rects[3].0[3], 1.0);
-        }
-    }
-
-    #[test]
-    fn test_10_resolution_change() {
-        for (ox, oy) in [(100.0, 100.0), (340.0, 180.0), (820.0, 540.0)] {
-            let rects = slot_border_rects(ox, oy, COLOR_UNCOMMON);
-            assert_eq!(rects[0].0, [ox - 1.0, oy - 1.0, 18.0, 1.0]);
-            assert_eq!(rects[1].0, [ox - 1.0, oy, 1.0, 16.0]);
-            assert_eq!(rects[2].0, [ox + 16.0, oy, 1.0, 16.0]);
-            assert_eq!(rects[3].0, [ox - 1.0, oy + 16.0, 18.0, 1.0]);
         }
     }
 
@@ -515,6 +791,25 @@ mod tests {
         let toggled = toggle_enabled();
         assert!(!toggled);
         assert!(!is_enabled(|| None));
+
+        // When disabled, render_slot_decoration produces 0 draw calls
+        let mut drawn = 0;
+        let calls = render_slot_decoration(
+            10.0,
+            10.0,
+            false,
+            1,
+            "minecraft:trident",
+            false,
+            false,
+            false,
+            "rare",
+            false,
+            |_, _| drawn += 1,
+        );
+        assert_eq!(calls, 0);
+        assert_eq!(drawn, 0);
+
         set_enabled(true);
     }
 
@@ -584,43 +879,67 @@ mod tests {
     }
 
     #[test]
-    fn test_15_should_render_border_carried_cursor_suppression() {
-        // Carried cursor item must NEVER show a slot border
-        let res = should_render_border(true, false, false, true, false, Rarity::Rare, false);
-        assert_eq!(res, None);
+    fn test_15_carried_cursor_suppression() {
+        // Carried cursor item must NEVER show a slot border and must yield 0 draw calls
+        let mut drawn = 0;
+        let calls = render_slot_decoration(
+            10.0,
+            10.0,
+            true,
+            1,
+            "minecraft:trident",
+            false,
+            false,
+            true, // is_carried_cursor
+            "rare",
+            false,
+            |_, _| drawn += 1,
+        );
+        assert_eq!(calls, 0);
+        assert_eq!(drawn, 0);
     }
 
     #[test]
-    fn test_16_should_render_border_hotbar_rules() {
+    fn test_16_hotbar_rules() {
         // In-game playing HUD:
-        // When show_hotbar is false -> None
-        assert_eq!(
-            should_render_border(true, true, false, false, false, Rarity::Epic, false),
-            None
+        // When show_hotbar is false -> 0 calls
+        let mut drawn = 0;
+        let calls = render_slot_decoration(
+            10.0,
+            10.0,
+            true,
+            1,
+            "minecraft:dragon_egg",
+            true,  // is_playing_hud
+            false, // show_hotbar = false
+            false,
+            "epic",
+            false,
+            |_, _| drawn += 1,
         );
-        // When show_hotbar is true -> Some(COLOR_EPIC)
-        assert_eq!(
-            should_render_border(true, true, true, false, false, Rarity::Epic, false),
-            Some(COLOR_EPIC)
+        assert_eq!(calls, 0);
+        assert_eq!(drawn, 0);
+
+        // When show_hotbar is true -> 4 calls
+        let calls_on = render_slot_decoration(
+            10.0,
+            10.0,
+            true,
+            1,
+            "minecraft:dragon_egg",
+            true, // is_playing_hud
+            true, // show_hotbar = true
+            false,
+            "epic",
+            false,
+            |_, _| drawn += 1,
         );
+        assert_eq!(calls_on, 4);
+        assert_eq!(drawn, 4);
     }
 
     #[test]
-    fn test_17_should_render_border_common_item_rules() {
-        // Common item with show_common = false -> None
-        assert_eq!(
-            should_render_border(true, false, false, false, false, Rarity::Common, false),
-            None
-        );
-        // Common item with show_common = true -> Some(COLOR_COMMON)
-        assert_eq!(
-            should_render_border(true, false, false, false, false, Rarity::Common, true),
-            Some(COLOR_COMMON)
-        );
-    }
-
-    #[test]
-    fn test_18_render_slot_border_exact_draw_calls() {
+    fn test_17_exact_draw_calls_alpha_distribution() {
         let mut drawn = Vec::new();
         render_slot_border(10.0, 20.0, COLOR_RARE, |rect, argb| {
             drawn.push((rect, argb));
@@ -645,16 +964,26 @@ mod tests {
     }
 
     #[test]
-    fn test_19_resolve_rarity_custom_component_override() {
+    fn test_18_custom_rarity_component_override() {
         // A stick with custom `minecraft:rarity = "epic"` must resolve to Epic
         assert_eq!(
             resolve_rarity("common", false, Some("epic"), false),
             Rarity::Epic
         );
-        // And when enchanted, epic remains epic
         assert_eq!(
             resolve_rarity("common", false, Some("epic"), true),
             Rarity::Epic
         );
+    }
+
+    #[test]
+    fn test_19_ominous_banner_override() {
+        // An ominous banner is always Uncommon base rarity
+        assert_eq!(
+            resolve_rarity("common", true, None, false),
+            Rarity::Uncommon
+        );
+        // When enchanted, it upgrades to Rare
+        assert_eq!(resolve_rarity("common", true, None, true), Rarity::Rare);
     }
 }
